@@ -36,7 +36,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = VRM4U)
 	void DestroyVMCServer(const FString ServerAddress, int port);
 
-	bool FindOrAddServer(const FString ServerAddress, int port);
+	UFUNCTION(BlueprintCallable, Category = VRM4U)
+	void DestroyVMCServerAll();
+
+	UVrmVMCObject* FindOrAddServer(const FString ServerAddress, int port);
 
 	TArray< TStrongObjectPtr<UVrmVMCObject> > VMCObjectList;
 
@@ -44,6 +47,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = VRM4U)
 	bool GetVMCData(TMap<FString, FTransform> &BoneData, TMap<FString, float> &CurveData, FString ServerAddress, int port);
+
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 
 private:
 };

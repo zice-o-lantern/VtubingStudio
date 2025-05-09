@@ -1,4 +1,4 @@
-// VRM4U Copyright (c) 2021-2024 Haruyoshi Yamamoto. This software is released under the MIT License.
+﻿// VRM4U Copyright (c) 2021-2024 Haruyoshi Yamamoto. This software is released under the MIT License.
 
 #include "VrmConvertMorphTarget.h"
 #include "VrmConvert.h"
@@ -198,6 +198,12 @@ static bool readMorph2(TArray<FMorphTargetDelta> &MorphDeltas, aiString targetNa
 							aiV[1] * 100.f
 						);
 					}
+
+					// apply original root bone rotation
+					FVector tmp;
+					tmp.Set(v.PositionDelta.X, v.PositionDelta.Y, v.PositionDelta.Z);
+					tmp = assetList->model_root_transform.TransformVector(tmp);
+					v.PositionDelta.Set(tmp.X, tmp.Y, tmp.Z);
 				}
 
 				v.PositionDelta *= VRMConverter::Options::Get().GetModelScale();
@@ -446,9 +452,13 @@ bool VRMConverter::ConvertMorphTarget(UVrmAssetListObject *vrmAssetList) {
 #if	UE_VERSION_OLDER_THAN(5,4,0)
 			sk->GetResourceForRendering()->LODRenderData[0].InitResources(false, 0, VRMGetMorphTargets(sk), sk);
 #else
-#if WITH_EDITOR
-			sk->GetResourceForRendering()->LODRenderData[0].InitResources(false, 0, VRMGetMorphTargets(sk), sk);
-#endif
+			{
+				TArray<UMorphTarget*> morphtargets;
+				for (auto morphtarget : VRMGetMorphTargets(sk)) {
+					morphtargets.Add(morphtarget);
+				}
+				sk->GetResourceForRendering()->LODRenderData[0].InitResources(false, 0, morphtargets, sk);
+			}
 #endif
 		}
 	}

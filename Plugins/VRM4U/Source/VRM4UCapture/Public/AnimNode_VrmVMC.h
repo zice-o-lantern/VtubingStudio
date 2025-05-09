@@ -50,13 +50,16 @@ struct VRM4UCAPTURE_API FAnimNode_VrmVMC : public FAnimNode_SkeletalControlBase
 	bool bIgnoreLocalRotation = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Skeleton, meta = (PinShownByDefault))
-	FString ServerAddress = "127.0.0.1";
+	FString ServerAddress = "0.0.0.0";
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Skeleton, meta = (PinShownByDefault))
 	int Port = 39539;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Skeleton, meta = (PinShownByDefault))
 	bool bApplyPerfectSync = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Skeleton, meta = (PinHiddenByDefault))
+	bool bForceUpdate = false;
 
 	bool bCreateServer = false;
 

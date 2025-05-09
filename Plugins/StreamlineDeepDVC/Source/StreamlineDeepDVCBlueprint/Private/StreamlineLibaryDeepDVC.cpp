@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022 - 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* Copyright (c) 2022 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 *
 * NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
 * property and proprietary rights in and to this material, related
@@ -10,8 +10,9 @@
 */
 
 #include "StreamlineLibraryDeepDVC.h"
-#if WITH_STREAMLINE
 #include "StreamlineLibrary.h"
+
+#if WITH_STREAMLINE
 #include "StreamlineCore.h"
 #include "StreamlineRHI.h"
 #include "StreamlineDeepDVC.h"
@@ -21,6 +22,7 @@
 #endif
 
 #include "Modules/ModuleManager.h"
+#include "HAL/IConsoleManager.h"
 #include "Interfaces/IPluginManager.h"
 
 #ifdef __INTELLISENSE__
@@ -30,10 +32,22 @@
 #define LOCTEXT_NAMESPACE "FStreamlineDeepDVCBlueprintModule"
 DEFINE_LOG_CATEGORY_STATIC(LogStreamlineDeepDVCBlueprint, Log, All);
 
-static const FName SetDeepDVCModeInvalidEnumValueError= FName("SetDeepDVCModeInvalidEnumValueError");
-static const FName IsDeepDVCModeSupportedInvalidEnumValueError = FName("IsDeepDVCModeSupportedInvalidEnumValueError");
+#if WITH_STREAMLINE
 
-UStreamlineFeatureSupport UStreamlineLibraryDeepDVC::DeepDVCSupport = UStreamlineFeatureSupport::NotSupportedByPlatformAtBuildTime;
+#define TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(ReturnValueOrEmptyOrVoidPreFiveThree) \
+if (!TryInitDeepDVCLibrary()) \
+{ \
+	UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("%s should not be called before PostEngineInit"), ANSI_TO_TCHAR(__FUNCTION__)); \
+	return ReturnValueOrEmptyOrVoidPreFiveThree; \
+}
+
+#else
+
+#define TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(ReturnValueWhichCanBeEmpty) 
+
+#endif
+
+EStreamlineFeatureSupport UStreamlineLibraryDeepDVC::DeepDVCSupport = EStreamlineFeatureSupport::NotSupportedByPlatformAtBuildTime;
 #if WITH_STREAMLINE
 
 bool UStreamlineLibraryDeepDVC::bDeepDVCLibraryInitialized = false;
@@ -62,70 +76,46 @@ void UStreamlineLibraryDeepDVC::GetDeepDVCOnScreenMessages(TMultiMap<FCoreDelega
 
 #endif
 
-bool UStreamlineLibraryDeepDVC::IsDeepDVCModeSupported(UStreamlineDeepDVCMode DeepDVCMode)
+bool UStreamlineLibraryDeepDVC::IsDeepDVCModeSupported(EStreamlineDeepDVCMode DeepDVCMode)
 {
-	const UEnum* Enum = StaticEnum<UStreamlineDeepDVCMode>();
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(false)
 
-	// UEnums are strongly typed, but then one can also cast a byte to an UEnum ...
-	if (Enum->IsValidEnumValue(int64(DeepDVCMode)) && (Enum->GetMaxEnumValue() != int64(DeepDVCMode)))
+		const UEnum* Enum = StaticEnum<EStreamlineDeepDVCMode>();
+
+	if (ValidateEnumValue(DeepDVCMode, __FUNCTION__))
 	{
-		if (DeepDVCMode == UStreamlineDeepDVCMode::Off)
+		if (DeepDVCMode == EStreamlineDeepDVCMode::Off)
 		{
 			return true;
 		}
-#if WITH_STREAMLINE
-		if (!TryInitDeepDVCLibrary())
-		{
-			UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("IsDeepDVCModeSupported should not be called before PostEngineInit"));
-			return false;
-		}
-		if (!IsDeepDVCSupported())
+
+		if (!IsDeepDVCSupported()) // that returns false if WITH_STREAMLINE is false 
 		{
 			return false;
 		}
-		else
-		{
-			return true; // TODO
-		}
-#else
-		return false;
-#endif
-	}
-	else
-	{
-#if !UE_BUILD_SHIPPING
-		FFrame::KismetExecutionMessage(*FString::Printf(
-			TEXT("IsDeepDVCModeSupported should not be called with an invalid DeepDVCMode enum value (%d) \"%s\""),
-			int64(DeepDVCMode), *StaticEnum<UStreamlineDeepDVCMode>()->GetDisplayNameTextByValue(int64(DeepDVCMode)).ToString()),
-			ELogVerbosity::Error, IsDeepDVCModeSupportedInvalidEnumValueError);
-#endif 
-		return false;
+
+		return true;
 	}
 
+	return false;
 }
 
-TArray<UStreamlineDeepDVCMode> UStreamlineLibraryDeepDVC::GetSupportedDeepDVCModes()
+
+
+TArray<EStreamlineDeepDVCMode> UStreamlineLibraryDeepDVC::GetSupportedDeepDVCModes()
 {
-	TArray<UStreamlineDeepDVCMode> SupportedQualityModes;
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
+	TArray<EStreamlineDeepDVCMode> SupportedQualityModes;
+
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(SupportedQualityModes);
 	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("GetSupportedDeepDVCModes should not be called before PostEngineInit"));
-		return SupportedQualityModes;
-	}
-#endif
-	{
-		const UEnum* Enum = StaticEnum<UStreamlineDeepDVCMode>();
-		for (int32 EnumIndex = 0; EnumIndex < Enum->NumEnums(); ++EnumIndex)
+		const UEnum* Enum = StaticEnum<EStreamlineDeepDVCMode>();
+		for (int32 EnumIndex = 0; EnumIndex < Enum->NumEnums() - 1 /* avoid _MAX */; ++EnumIndex)
 		{
 			const int64 EnumValue = Enum->GetValueByIndex(EnumIndex);
-			if (EnumValue != Enum->GetMaxEnumValue())
+			const EStreamlineDeepDVCMode QualityMode = EStreamlineDeepDVCMode(EnumValue);
+			if (IsDeepDVCModeSupported(QualityMode))
 			{
-				const UStreamlineDeepDVCMode QualityMode = UStreamlineDeepDVCMode(EnumValue);
-				if (IsDeepDVCModeSupported(QualityMode))
-				{
-					SupportedQualityModes.Add(QualityMode);
-				}
+				SupportedQualityModes.Add(QualityMode);
 			}
 		}
 	}
@@ -134,39 +124,30 @@ TArray<UStreamlineDeepDVCMode> UStreamlineLibraryDeepDVC::GetSupportedDeepDVCMod
 
 bool UStreamlineLibraryDeepDVC::IsDeepDVCSupported()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("IsDeepDVCSupported should not be called before PostEngineInit"));
-		return false;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(false);
 
-	return QueryDeepDVCSupport() == UStreamlineFeatureSupport::Supported;
+#if WITH_STREAMLINE
+	return QueryDeepDVCSupport() == EStreamlineFeatureSupport::Supported;
 #else
 	return false;
 #endif
 }
 
-UStreamlineFeatureSupport UStreamlineLibraryDeepDVC::QueryDeepDVCSupport()
+EStreamlineFeatureSupport UStreamlineLibraryDeepDVC::QueryDeepDVCSupport()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("QueryDeepDVCSupport should not be called before PostEngineInit"));
-		return UStreamlineFeatureSupport::NotSupported;
-	}
-#endif
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(EStreamlineFeatureSupport::NotSupported);
+
 	return DeepDVCSupport;
 }
 
 #if WITH_STREAMLINE
-static int32 DeepDVCModeIntCvarFromEnum(UStreamlineDeepDVCMode DeepDVCMode)
+static int32 DeepDVCModeIntCvarFromEnum(EStreamlineDeepDVCMode DeepDVCMode)
 {
 	switch (DeepDVCMode)
 	{
-	case UStreamlineDeepDVCMode::Off:
+	case EStreamlineDeepDVCMode::Off:
 		return 0;
-	case UStreamlineDeepDVCMode::On:
+	case EStreamlineDeepDVCMode::On:
 		return 1;
 	default:
 		checkf(false, TEXT("dear DeepDVC plugin developer, please support new enum type!"));
@@ -174,34 +155,30 @@ static int32 DeepDVCModeIntCvarFromEnum(UStreamlineDeepDVCMode DeepDVCMode)
 	}
 }
 
-static UStreamlineDeepDVCMode DeepDVCModeEnumFromIntCvar(int32 DeepDVCMode)
+static EStreamlineDeepDVCMode DeepDVCModeEnumFromIntCvar(int32 DeepDVCMode)
 {
 	switch (DeepDVCMode)
 	{
 	case 0:
-		return UStreamlineDeepDVCMode::Off;
+		return EStreamlineDeepDVCMode::Off;
 	case 1:
-		return UStreamlineDeepDVCMode::On;
+		return EStreamlineDeepDVCMode::On;
 	default:
 		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("Invalid r.Streamline.DeepDVC.Enable value %d"), DeepDVCMode);
-		return UStreamlineDeepDVCMode::Off;
+		return EStreamlineDeepDVCMode::Off;
 	}
 }
 #endif	// WITH_STREAMLINE
 
-void UStreamlineLibraryDeepDVC::SetDeepDVCMode(UStreamlineDeepDVCMode DeepDVCMode)
+void UStreamlineLibraryDeepDVC::SetDeepDVCMode(EStreamlineDeepDVCMode DeepDVCMode)
 {
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(void());
+
 #if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("SetDeepDVCMode should not be called before PostEngineInit"));
-		return;
-	}
 
-	const UEnum* Enum = StaticEnum<UStreamlineDeepDVCMode>();
+	const UEnum* Enum = StaticEnum<EStreamlineDeepDVCMode>();
 
-	// UEnums are strongly typed, but then one can also cast a byte to an UEnum ...
-	if(Enum->IsValidEnumValue(int64(DeepDVCMode)) && (Enum->GetMaxEnumValue() != int64(DeepDVCMode)))
+	if (ValidateEnumValue(DeepDVCMode, __FUNCTION__))
 	{
 		static auto CVarDeepDVCEnable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.Enable"));
 		if (CVarDeepDVCEnable)
@@ -209,7 +186,7 @@ void UStreamlineLibraryDeepDVC::SetDeepDVCMode(UStreamlineDeepDVCMode DeepDVCMod
 			CVarDeepDVCEnable->SetWithCurrentPriority(DeepDVCModeIntCvarFromEnum(DeepDVCMode));
 		}
 		
-		if (DeepDVCMode != UStreamlineDeepDVCMode::Off)
+		if (DeepDVCMode != EStreamlineDeepDVCMode::Off)
 		{
 #if !UE_BUILD_SHIPPING
 			check(IsInGameThread());
@@ -218,64 +195,42 @@ void UStreamlineLibraryDeepDVC::SetDeepDVCMode(UStreamlineDeepDVCMode DeepDVCMod
 #endif 
 		}
 	}
-	else
-	{
-#if !UE_BUILD_SHIPPING
-		FFrame::KismetExecutionMessage(*FString::Printf(
-			TEXT("SetDeepDVCMode should not be called with an invalid DeepDVCMode enum value (%d) \"%s\""), 
-			int64(DeepDVCMode), *StaticEnum<UStreamlineDeepDVCMode>()->GetDisplayNameTextByValue(int64(DeepDVCMode)).ToString()),
-			ELogVerbosity::Error, SetDeepDVCModeInvalidEnumValueError);
-#endif 
-	}
+
 #endif	// WITH_STREAMLINE
 }
 
-UStreamlineDeepDVCMode UStreamlineLibraryDeepDVC::GetDeepDVCMode()
+EStreamlineDeepDVCMode UStreamlineLibraryDeepDVC::GetDeepDVCMode()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("GetDeepDVCMode should not be called before PostEngineInit"));
-		return UStreamlineDeepDVCMode::Off;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(EStreamlineDeepDVCMode::Off);
 
+#if WITH_STREAMLINE
 	static const auto CVarDeepDVCEnable = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.Enable"));
 	if (CVarDeepDVCEnable != nullptr)
 	{
 		return DeepDVCModeEnumFromIntCvar(CVarDeepDVCEnable->GetInt());
 	}
 #endif
-	return UStreamlineDeepDVCMode::Off;
+	return EStreamlineDeepDVCMode::Off;
 }
 
-UStreamlineDeepDVCMode UStreamlineLibraryDeepDVC::GetDefaultDeepDVCMode()
+EStreamlineDeepDVCMode UStreamlineLibraryDeepDVC::GetDefaultDeepDVCMode()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("GetDefaultDeepDVCMode should not be called before PostEngineInit"));
-		return UStreamlineDeepDVCMode::Off;
-	}
-#endif
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(EStreamlineDeepDVCMode::Off);
 	if (UStreamlineLibraryDeepDVC::IsDeepDVCSupported())
 	{
-		return UStreamlineDeepDVCMode::Off;
+		return EStreamlineDeepDVCMode::Off;
 	}
 	else
 	{
-		return UStreamlineDeepDVCMode::Off;
+		return EStreamlineDeepDVCMode::Off;
 	}
 }
 
 STREAMLINEDEEPDVCBLUEPRINT_API void UStreamlineLibraryDeepDVC::SetDeepDVCIntensity(float Intensity)
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("SetDeepDVCIntensity should not be called before PostEngineInit"));
-		return ;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(void());
 
+#if WITH_STREAMLINE
 	static const auto CVarDeepDVCIntensity = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.Intensity"));
 	if (CVarDeepDVCIntensity)
 	{
@@ -283,20 +238,15 @@ STREAMLINEDEEPDVCBLUEPRINT_API void UStreamlineLibraryDeepDVC::SetDeepDVCIntensi
 		// CVarDeepDVCSaturationBoost->Set(..., ECVF_SetByCommandline) internally uses	Set(*FString::Printf(TEXT("%g"), InValue),...); which doesn't snap to 0
 		CVarDeepDVCIntensity->Set(*FString::Printf(TEXT("%2.2f"), Intensity), ECVF_SetByCommandline);
 	}
-
 #endif
 
 }
 
 STREAMLINEDEEPDVCBLUEPRINT_API float UStreamlineLibraryDeepDVC::GetDeepDVCIntensity()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("GetDeepDVCIntensity should not be called before PostEngineInit"));
-		return 0.0f;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(0.0f);
 
+#if WITH_STREAMLINE
 	static const auto CVarDeepDVCIntensity = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.Intensity"));
 
 	if (CVarDeepDVCIntensity)
@@ -310,13 +260,9 @@ STREAMLINEDEEPDVCBLUEPRINT_API float UStreamlineLibraryDeepDVC::GetDeepDVCIntens
 
 STREAMLINEDEEPDVCBLUEPRINT_API void UStreamlineLibraryDeepDVC::SetDeepDVCSaturationBoost(float SaturationBoost)
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("SetDeepDVCSaturationBoost should not be called before PostEngineInit"));
-		return;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(void());
 
+#if WITH_STREAMLINE
 	static const auto CVarDeepDVCSaturationBoost = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.SaturationBoost"));
 	if (CVarDeepDVCSaturationBoost)
 	{
@@ -329,13 +275,9 @@ STREAMLINEDEEPDVCBLUEPRINT_API void UStreamlineLibraryDeepDVC::SetDeepDVCSaturat
 
 STREAMLINEDEEPDVCBLUEPRINT_API float UStreamlineLibraryDeepDVC::GetDeepDVCSaturationBoost()
 {
-#if WITH_STREAMLINE
-	if (!TryInitDeepDVCLibrary())
-	{
-		UE_LOG(LogStreamlineDeepDVCBlueprint, Error, TEXT("GetDeepDVCSaturationBoost should not be called before PostEngineInit"));
-		return 0.0f;
-	}
+	TRY_INIT_STREAMLINE_DEEPDVC_LIBRARY_AND_RETURN(0.0f);
 
+#if WITH_STREAMLINE
 	static const auto CVarDeepDVCSaturationBoost = IConsoleManager::Get().FindConsoleVariable(TEXT("r.Streamline.DeepDVC.SaturationBoost"));
 
 	if (CVarDeepDVCSaturationBoost)
@@ -377,18 +319,18 @@ bool UStreamlineLibraryDeepDVC::TryInitDeepDVCLibrary()
 		}
 		else
 		{
-			DeepDVCSupport = UStreamlineFeatureSupport::NotSupportedByRHI;
+			DeepDVCSupport = EStreamlineFeatureSupport::NotSupportedByRHI;
 		}
 	}
 	else
 	{
 		if (GetPlatformStreamlineSupport() == EStreamlineSupport::NotSupportedIncompatibleRHI)
 		{
-			DeepDVCSupport = UStreamlineFeatureSupport::NotSupportedByRHI;
+			DeepDVCSupport = EStreamlineFeatureSupport::NotSupportedByRHI;
 		}
 		else
 		{
-			DeepDVCSupport = UStreamlineFeatureSupport::NotSupported;
+			DeepDVCSupport = EStreamlineFeatureSupport::NotSupported;
 		}
 	}
 
@@ -404,10 +346,10 @@ void UStreamlineLibraryDeepDVC::Startup()
 #if WITH_STREAMLINE
 	// This initialization will likely not succeed unless this module has been moved to PostEngineInit, and that's ok
 	UStreamlineLibraryDeepDVC::TryInitDeepDVCLibrary();
-	UStreamlineLibrary::RegisterFeatureSupport(UStreamlineFeature::DeepDVC, UStreamlineLibraryDeepDVC::QueryDeepDVCSupport());
+	UStreamlineLibrary::RegisterFeatureSupport(EStreamlineFeature::DeepDVC, UStreamlineLibraryDeepDVC::QueryDeepDVCSupport());
 #else
-	UE_LOG(LogStreamlineDeepDVCBlueprint, Log, TEXT("Streamline is not supported on this platform at build time. The Streamline Blueprint library however is supported and stubbed out to ignore any calls to enable DLSS-G and will always return UStreamlineDeepDVCSupport::NotSupportedByPlatformAtBuildTime, regardless of the underlying hardware. This can be used to e.g. to turn off DLSS-G related UI elements."));
-	UStreamlineLibraryDeepDVC::DeepDVCSupport = UStreamlineFeatureSupport::NotSupportedByPlatformAtBuildTime;
+	UE_LOG(LogStreamlineDeepDVCBlueprint, Log, TEXT("Streamline is not supported on this platform at build time. The Streamline Blueprint library however is supported and stubbed out to ignore any calls to enable DeepDVC and will always return UStreamlineFeatureSupport::NotSupportedByPlatformAtBuildTime, regardless of the underlying hardware. This can be used to e.g. to turn off related UI elements."));
+	UStreamlineLibraryDeepDVC::DeepDVCSupport = EStreamlineFeatureSupport::NotSupportedByPlatformAtBuildTime;
 #endif
 }
 void UStreamlineLibraryDeepDVC::Shutdown()
