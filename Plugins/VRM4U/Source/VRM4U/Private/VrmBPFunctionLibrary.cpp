@@ -30,27 +30,29 @@
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshModel.h"
 
-#if	UE_VERSION_OLDER_THAN(5,0,0)
+#include "VrmRigHeader.h"
 
-#elif UE_VERSION_OLDER_THAN(5,3,0)
-#include "IKRigDefinition.h"
-#include "IKRigSolver.h"
-#include "Retargeter/IKRetargeter.h"
-#if WITH_EDITOR
-#include "RigEditor/IKRigController.h"
-#include "RetargetEditor/IKRetargeterController.h"
-#endif
-
+#if	UE_VERSION_OLDER_THAN(5,5,0)
 #else
-#include "Rig/IKRigDefinition.h"
-#include "Rig/Solvers/IKRigSolver.h"
-#include "Retargeter/IKRetargeter.h"
-#if WITH_EDITOR
-#include "RigEditor/IKRigController.h"
-#include "RetargetEditor/IKRetargeterController.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #endif
 
+#if	UE_VERSION_OLDER_THAN(5,1,0)
+#else
+#if WITH_EDITOR
+#define VRM4U_USE_MRQ 1
 #endif
+#endif
+
+#ifndef VRM4U_USE_MRQ
+#define VRM4U_USE_MRQ 0
+#endif
+
+
+#if VRM4U_USE_MRQ
+#include "MoviePipelineQueueSubsystem.h"
+#endif
+
 
 #include "Animation/AnimInstance.h"
 #include "VrmAnimInstanceCopy.h"
@@ -470,7 +472,7 @@ void UVrmBPFunctionLibrary::VRMDrawMaterialToRenderTarget(UObject* WorldContextO
 		}
 		);
 	}
-#else
+#elif UE_VERSION_OLDER_THAN(5,5,0)
 	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
 
 	if (!World)
@@ -545,6 +547,9 @@ void UVrmBPFunctionLibrary::VRMDrawMaterialToRenderTarget(UObject* WorldContextO
 		}
 		);
 	}
+#else
+	// 5.5.0
+	UKismetRenderingLibrary::DrawMaterialToRenderTarget(WorldContextObject, TextureRenderTarget, Material);
 #endif
 }
 
@@ -607,8 +612,12 @@ void UVrmBPFunctionLibrary::VRMChangeMaterialParent(UMaterialInstanceConstant *d
 		return;
 	}
 
-	dst->PreEditChange(NULL);
 	dst->SetParentEditorOnly(NewParent);
+
+	FMaterialUpdateContext UpdateContext(FMaterialUpdateContext::EOptions::Default, GMaxRHIShaderPlatform);
+	UpdateContext.AddMaterialInstance(dst);
+
+	dst->PreEditChange(NULL);
 	dst->PostEditChange();
 
 	// remove dynamic materials
@@ -616,11 +625,6 @@ void UVrmBPFunctionLibrary::VRMChangeMaterialParent(UMaterialInstanceConstant *d
 		if (Itr->Parent == dst) {
 			Itr->ConditionalBeginDestroy();
 		}
-	}
-
-	if (UseSkeletalMesh) {
-		UseSkeletalMesh->PreEditChange(NULL);
-		UseSkeletalMesh->PostEditChange();
 	}
 
 #else
@@ -1039,6 +1043,43 @@ bool UVrmBPFunctionLibrary::VRMRenderingThreadEnable(bool bEnable) {
 	return true;
 }
 
+int UVrmBPFunctionLibrary::VRMGetMeshSectionNum(const USkeletalMesh* mesh) {
+	if (mesh == nullptr) return 0;
+	return mesh->GetResourceForRendering()->LODRenderData[0].RenderSections.Num();
+
+/*
+	FSkeletalMeshRenderData* SkelMeshRenderData = GetResourceForRendering();
+	for (int32 LODIndex = MinLODIndex; LODIndex < SkelMeshRenderData->LODRenderData.Num(); LODIndex++)
+	{
+		FSkeletalMeshLODRenderData& LODRenderData = SkelMeshRenderData->LODRenderData[LODIndex];
+		const FSkeletalMeshLODInfo& Info = *(GetLODInfo(LODIndex));
+
+		// Check all render sections for the used material indices
+		for (int32 SectionIndex = 0; SectionIndex < LODRenderData.RenderSections.Num(); SectionIndex++)
+		{
+			FSkelMeshRenderSection& RenderSection = LODRenderData.RenderSections[SectionIndex];
+
+			// By default use the material index of the render section
+
+
+*/
+}
+
+bool UVrmBPFunctionLibrary::VRMRemoveMeshSection(USkeletalMesh* mesh, int LODIndex, int SectionIndex) {
+#if WITH_EDITOR
+	if (mesh == nullptr) return false;
+
+	if (mesh->GetResourceForRendering()->LODRenderData.IsValidIndex(LODIndex)) {
+
+		mesh->RemoveMeshSection(LODIndex, SectionIndex);
+		mesh->MarkPackageDirty();
+		return true;
+	}
+#endif
+	return false;
+}
+
+
 bool UVrmBPFunctionLibrary::VRMGetShadowEnable(const USkeletalMesh *mesh, int MaterialIndex) {
 
 	if (mesh == nullptr) {
@@ -1285,9 +1326,9 @@ void UVrmBPFunctionLibrary::VRMGetPlayMode(bool &bPlay, bool &bSIE, bool &bEdito
 	}
 
 	if (GWorld) {
-		//if (GWorld->IsClient()) {
-			//bPlay = true;
-		//}
+		if (GWorld->HasBegunPlay() && GWorld->IsGameWorld()) {
+			bPlay = true;
+		}
 	}
 
 #else
@@ -1410,10 +1451,17 @@ void UVrmBPFunctionLibrary::VRMExecuteConsoleCommand(UObject* WorldContextObject
 		return;
 	}
 
+#if	UE_VERSION_OLDER_THAN(5,5,0)
+
 	FOutputDevice& EffectiveOutputDevice = (FOutputDevice&)(*GLog);
 	FConsoleManager& ConsoleManager = (FConsoleManager&)IConsoleManager::Get();
+#else
 
+	FOutputDevice& EffectiveOutputDevice = (FOutputDevice&)(*GLog);
+	auto& ConsoleManager = IConsoleManager::Get();
+#endif
 	ConsoleManager.ProcessUserConsoleInput(&(cmd.GetCharArray()[0]), EffectiveOutputDevice, World);
+
 }
 
 
@@ -1696,14 +1744,17 @@ bool UVrmBPFunctionLibrary::VRMBakeAnim(const USkeletalMeshComponent* skc, const
 		ase->MarkRawDataAsModified();
 #elif UE_VERSION_OLDER_THAN(5,2,0)
 		ase->GetController().SetPlayLength(totalTime);
-		//ase->MarkRawDataAsModified();
+		ase->SetUseRawDataOnly(true);
+		ase->FlagDependentAnimationsAsRawDataOnly();
+		ase->UpdateDependentStreamingAnimations();
+#elif UE_VERSION_OLDER_THAN(5,6,0)
+		ase->GetController().SetNumberOfFrames(ase->GetController().ConvertSecondsToFrameNumber(totalTime));
 		ase->SetUseRawDataOnly(true);
 		ase->FlagDependentAnimationsAsRawDataOnly();
 		ase->UpdateDependentStreamingAnimations();
 #else
 		ase->GetController().SetNumberOfFrames(ase->GetController().ConvertSecondsToFrameNumber(totalTime));
-		//ase->MarkRawDataAsModified();
-		ase->SetUseRawDataOnly(true);
+		//ase->SetUseRawDataOnly(true);
 		ase->FlagDependentAnimationsAsRawDataOnly();
 		ase->UpdateDependentStreamingAnimations();
 #endif
@@ -1825,6 +1876,20 @@ void UVrmBPFunctionLibrary::VRMGetTopLevelAssetName(const FAssetData& target, FN
 
 
 UVrmAssetListObject* UVrmBPFunctionLibrary::VRMGetVrmAssetListObjectFromAsset(const UObject* Asset) {
-	return VRMUtil::GetAssetListObject(Asset);
+	return VRMUtil::GetAssetListObjectAny(Asset);
 }
+
+
+bool UVrmBPFunctionLibrary::VRMIsMovieRendering() {
+#if VRM4U_USE_MRQ
+	if (GEditor) {
+		UMoviePipelineQueueSubsystem* s = GEditor->GetEditorSubsystem<UMoviePipelineQueueSubsystem>();
+		if (s == nullptr) return false;
+
+		return s->IsRendering();
+	}
+#endif
+	return false;
+}
+
 

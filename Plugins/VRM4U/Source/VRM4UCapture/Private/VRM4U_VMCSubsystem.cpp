@@ -36,7 +36,7 @@ bool UVRM4U_VMCSubsystem::GetVMCData(TMap<FString, FTransform>& BoneData, TMap<F
 }
 
 
-bool UVRM4U_VMCSubsystem::FindOrAddServer(const FString ServerAddress, int port) {
+UVrmVMCObject* UVRM4U_VMCSubsystem::FindOrAddServer(const FString ServerAddress, int port) {
 
 	bool bFound = false;
 	for (int i = 0; i < VMCObjectList.Num(); ++i) {
@@ -45,15 +45,16 @@ bool UVRM4U_VMCSubsystem::FindOrAddServer(const FString ServerAddress, int port)
 
 		if (a->ServerName == ServerAddress && a->port == port) {
 			bFound = true;
-			break;
+			return a;
 		}
 	}
 	if (bFound == false) {
 		int ind = VMCObjectList.AddDefaulted();
 		VMCObjectList[ind].Reset(NewObject<UVrmVMCObject>());
 		VMCObjectList[ind]->CreateServer(ServerAddress, port);
+		return VMCObjectList[ind].Get();
 	}
-	return true;
+	return nullptr;
 }
 
 void UVRM4U_VMCSubsystem::DestroyVMCServer(const FString ServerAddress, int port) {
@@ -62,16 +63,27 @@ void UVRM4U_VMCSubsystem::DestroyVMCServer(const FString ServerAddress, int port
 		if (a == nullptr) continue;
 
 		if (a->ServerName == ServerAddress && a->port == port) {
+			a->DestroyServer();
 			VMCObjectList[i].Reset(nullptr);
 			VMCObjectList.RemoveAt(i);
 			return;
 		}
 	}
 }
+void UVRM4U_VMCSubsystem::DestroyVMCServerAll() {
+	while (VMCObjectList.Num()) {
+		auto a = VMCObjectList[0].Get();
+		if (a) {
+			a->DestroyServer();
+		}
+		VMCObjectList[0].Reset(nullptr);
+		VMCObjectList.RemoveAt(0);
+	}
+}
 
 
 bool UVRM4U_VMCSubsystem::CreateVMCServer(const FString ServerAddress, int port) {
-	return FindOrAddServer(ServerAddress, port);
+	return (FindOrAddServer(ServerAddress, port) != nullptr);
 }
 
 void UVRM4U_VMCSubsystem::ClearData(const FString ServerAddress, int port) {
@@ -85,3 +97,17 @@ void UVRM4U_VMCSubsystem::ClearData(const FString ServerAddress, int port) {
 		}
 	}
 }
+
+void UVRM4U_VMCSubsystem::Initialize(FSubsystemCollectionBase& Collection) {
+	Super::Initialize(Collection);
+
+#if WITH_EDITOR
+	FEditorDelegates::BeginStandaloneLocalPlay.AddLambda([&](const uint32 processID) {
+		this->DestroyVMCServerAll();
+	});
+#endif
+
+}
+
+
+

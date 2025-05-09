@@ -24,7 +24,7 @@ void UVrmVMCObject::CreateServer(FString inName, uint16 inPort) {
 	port = inPort;
 #if	UE_VERSION_OLDER_THAN(4,25,0)
 #else
-	OSCServer.Reset(UOSCManager::CreateOSCServer(ServerName, port, false, true, FString(), this));
+	OSCServer.Reset(UOSCManager::CreateOSCServer(ServerName, port, true, true, FString(), this));
 
 	OSCServer->OnOscMessageReceivedNative.RemoveAll(nullptr);
 	OSCServer->OnOscMessageReceivedNative.AddUObject(this, &UVrmVMCObject::OSCReceivedMessageEvent);
@@ -61,17 +61,34 @@ void UVrmVMCObject::OSCReceivedMessageEvent(const FOSCMessage& Message, const FS
 
 	if (addressPath == TEXT("/VMC/Ext/Root/Pos")) {
 		VMCData.BoneData.FindOrAdd(str[0]) = t;
+		bDataUpdated = true;
 	}
 	if (addressPath == TEXT("/VMC/Ext/Bone/Pos")) {
 		VMCData.BoneData.FindOrAdd(str[0]) = t;
+		bDataUpdated = true;
 	}
 	if (addressPath == TEXT("/VMC/Ext/Blend/Val")) {
 		VMCData.CurveData.FindOrAdd(str[0]) = f;
+		bDataUpdated = true;
 	}
 
-	if (addressPath == TEXT("/VMC/Ext/OK")) {
-		FScopeLock lock(&cs);
-		VMCData_Cache = VMCData;
+	if (bDataUpdated == true){
+		bool b = bForceUpdate;
+		if (addressPath == TEXT("/VMC/Ext/OK")) {
+			b = true;
+		}
+		if (addressPath == TEXT("/VMC/Ext/T")) {
+			b = true;
+		}
+		if (addressPath == TEXT("/VMC/Ext/Blend/Apply")) {
+			b = true;
+		}
+		
+		if (b) {
+			FScopeLock lock(&cs);
+			VMCData_Cache = VMCData;
+			bDataUpdated = false;
+		}
 	}
 
 }

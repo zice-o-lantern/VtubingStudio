@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2022 - 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+* Copyright (c) 2022 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 *
 * NVIDIA CORPORATION, its affiliates and licensors retain all intellectual
 * property and proprietary rights in and to this material, related
@@ -47,6 +47,13 @@ public class StreamlineDeepDVCBlueprint : ModuleRules
 	
 		PublicDefinitions.Add("WITH_STREAMLINE=" + (bPlatformSupportsStreamline ? '1' : '0'));
 
+		PublicDependencyModuleNames.AddRange(
+			new string[]
+			{
+				"StreamlineBlueprint"
+			}
+		);
+
 		if (bPlatformSupportsStreamline)
 		{ 
 			PublicIncludePaths.AddRange(
@@ -74,7 +81,6 @@ public class StreamlineDeepDVCBlueprint : ModuleRules
 					"StreamlineRHI",
 					"Streamline",
 
-					"StreamlineBlueprint"
 				}
 			);
 		}
